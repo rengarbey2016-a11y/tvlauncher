@@ -5,13 +5,18 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.TextUtils
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -29,6 +34,14 @@ const val APK_URL = "https://github.com/rengarbey2016-a11y/tvlauncher/releases/d
 
 class AppItem(val label: String, val pkg: String, val icon: Drawable)
 
+class Card(ctx: Context) : LinearLayout(ctx) {
+    override fun setSelected(selected: Boolean) {
+        super.setSelected(selected)
+        val s = if (selected) 1.1f else 1f
+        animate().scaleX(s).scaleY(s).translationZ(if (selected) 20f else 0f).setDuration(120).start()
+    }
+}
+
 class MainActivity : Activity() {
     private val apps = ArrayList<AppItem>()
     private var grid: GridView? = null
@@ -39,6 +52,45 @@ class MainActivity : Activity() {
     private var ready = false
     private var showingError = false
     private var lastCheck = 0L
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun pillBg(normal: Int, focused: Int): StateListDrawable {
+        val sl = StateListDrawable()
+        sl.addState(intArrayOf(android.R.attr.state_focused), GradientDrawable().apply {
+            setColor(focused); cornerRadius = dp(24).toFloat()
+        })
+        sl.addState(intArrayOf(), GradientDrawable().apply {
+            setColor(normal); cornerRadius = dp(24).toFloat()
+        })
+        return sl
+    }
+
+    private fun cardBg(): StateListDrawable {
+        val sl = StateListDrawable()
+        sl.addState(intArrayOf(android.R.attr.state_selected), GradientDrawable().apply {
+            setColor(Color.parseColor("#40FFFFFF"))
+            cornerRadius = dp(18).toFloat()
+            setStroke(dp(2), Color.parseColor("#B3FFFFFF"))
+        })
+        sl.addState(intArrayOf(), GradientDrawable().apply {
+            setColor(Color.parseColor("#14FFFFFF"))
+            cornerRadius = dp(18).toFloat()
+        })
+        return sl
+    }
+
+    private fun styledButton(label: String, normal: Int, focused: Int, onClick: () -> Unit): Button {
+        return Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            background = pillBg(normal, focused)
+            setPadding(dp(22), dp(10), dp(22), dp(10))
+            setOnClickListener { onClick() }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,52 +132,79 @@ class MainActivity : Activity() {
     }
 
     private fun build() {
-        val d = resources.displayMetrics.density
-        val p = (32 * d).toInt()
-
+        val bg = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(Color.parseColor("#0B1020"), Color.parseColor("#1B1F4B"), Color.parseColor("#3A1C71"))
+        )
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#111111"))
-            setPadding(p, p, p, p)
+            background = bg
+            setPadding(dp(48), dp(28), dp(48), dp(20))
         }
 
-        val rt = TextView(this).apply {
+        val clock = TextClock(this).apply {
+            format12Hour = "HH:mm"
+            format24Hour = "HH:mm"
+            textSize = 44f
             setTextColor(Color.WHITE)
-            textSize = 20f
-            gravity = Gravity.CENTER_VERTICAL
+            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        }
+        val date = TextClock(this).apply {
+            format12Hour = "d MMMM EEEE"
+            format24Hour = "d MMMM EEEE"
+            textSize = 16f
+            setTextColor(Color.parseColor("#B0B8D9"))
+        }
+        val rt = TextView(this).apply {
+            setTextColor(Color.parseColor("#D0D6F0"))
+            textSize = 15f
+            setPadding(0, dp(8), 0, 0)
         }
         ramText = rt
-        val ub = Button(this).apply {
-            text = "Güncelle"
-            visibility = View.GONE
-            setOnClickListener { startUpdate() }
+        val st = TextView(this).apply {
+            setTextColor(Color.parseColor("#7C84A8"))
+            textSize = 11f
         }
+        statusText = st
+
+        val left = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(clock)
+            addView(date)
+            addView(rt)
+            addView(st)
+        }
+
+        val ub = styledButton("Güncelle", Color.parseColor("#2E7D32"), Color.parseColor("#00C853")) { startUpdate() }
+        ub.visibility = View.GONE
         updateBtn = ub
-        val btn = Button(this).apply {
-            text = "Belleği Boşalt"
-            setOnClickListener { cleanMemory() }
-        }
-        val header = LinearLayout(this).apply {
+        val cb = styledButton("Belleği Boşalt", Color.parseColor("#26FFFFFF"), Color.parseColor("#7C4DFF")) { cleanMemory() }
+
+        val right = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(rt, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(ub)
-            addView(btn)
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.leftMargin = dp(12)
+            addView(ub, lp)
+            addView(cb, lp)
+        }
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(right)
         }
         root.addView(header)
 
-        val st = TextView(this).apply {
-            setTextColor(Color.parseColor("#888888"))
-            textSize = 12f
-        }
-        statusText = st
-        root.addView(st)
-
         val g = GridView(this).apply {
             numColumns = 5
-            verticalSpacing = (16 * d).toInt()
-            horizontalSpacing = (16 * d).toInt()
-            setPadding(0, (16 * d).toInt(), 0, 0)
+            verticalSpacing = dp(20)
+            horizontalSpacing = dp(20)
+            clipChildren = false
+            clipToPadding = false
+            setPadding(dp(8), dp(24), dp(8), dp(16))
+            setSelector(ColorDrawable(Color.TRANSPARENT))
             setOnItemClickListener { _, _, pos, _ -> open(apps[pos].pkg) }
         }
         grid = g
@@ -139,6 +218,7 @@ class MainActivity : Activity() {
         try {
             loadApps()
             grid?.adapter = Adapter()
+            grid?.requestFocus()
             updateRam(null)
             checkUpdate()
         } catch (e: Throwable) {
@@ -288,17 +368,16 @@ class MainActivity : Activity() {
         override fun getItem(p: Int) = apps[p]
         override fun getItemId(p: Int) = p.toLong()
         override fun getView(p: Int, v: View?, parent: ViewGroup?): View {
-            val d = resources.displayMetrics.density
             val item = apps[p]
-            val box = LinearLayout(this@MainActivity).apply {
+            val box = Card(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                val pad = (12 * d).toInt()
-                setPadding(pad, pad, pad, pad)
+                background = cardBg()
+                setPadding(dp(12), dp(16), dp(12), dp(14))
             }
             val img = ImageView(this@MainActivity).apply {
                 setImageDrawable(item.icon)
-                layoutParams = LinearLayout.LayoutParams((72 * d).toInt(), (72 * d).toInt())
+                layoutParams = LinearLayout.LayoutParams(dp(72), dp(72))
             }
             val txt = TextView(this@MainActivity).apply {
                 text = item.label
@@ -306,6 +385,8 @@ class MainActivity : Activity() {
                 textSize = 14f
                 gravity = Gravity.CENTER
                 maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(0, dp(8), 0, 0)
             }
             box.addView(img)
             box.addView(txt)
