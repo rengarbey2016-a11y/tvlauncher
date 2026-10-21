@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private var grid: GridView? = null
     private var ramText: TextView? = null
     private var updateBtn: Button? = null
+    private var statusText: TextView? = null
     private val handler = Handler(Looper.getMainLooper())
     private var ready = false
     private var showingError = false
@@ -113,6 +114,13 @@ class MainActivity : Activity() {
         }
         root.addView(header)
 
+        val st = TextView(this).apply {
+            setTextColor(Color.parseColor("#888888"))
+            textSize = 12f
+        }
+        statusText = st
+        root.addView(st)
+
         val g = GridView(this).apply {
             numColumns = 5
             verticalSpacing = (16 * d).toInt()
@@ -150,6 +158,7 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         if (now - lastCheck < 10 * 60 * 1000) return
         lastCheck = now
+        statusText?.text = "Sürüm kontrol ediliyor..."
         thread {
             try {
                 val c = URL(API_URL).openConnection() as HttpURLConnection
@@ -158,8 +167,10 @@ class MainActivity : Activity() {
                 c.setRequestProperty("User-Agent", "Firfir")
                 val json = c.inputStream.bufferedReader().use { it.readText() }
                 val latest = JSONObject(json).optString("body").trim().toIntOrNull()
-                if (latest != null && latest > currentVersion()) {
-                    handler.post {
+                val cur = currentVersion()
+                handler.post {
+                    statusText?.text = "Kutudaki: v$cur · GitHub'daki: v${latest ?: "?"}"
+                    if (latest != null && latest > cur) {
                         updateBtn?.apply {
                             text = "Güncelle (v$latest)"
                             visibility = View.VISIBLE
@@ -168,6 +179,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 Log.w("Firfir", "update check failed", e)
+                handler.post { statusText?.text = "Kontrol hatası: " + e.toString().take(120) }
             }
         }
     }
