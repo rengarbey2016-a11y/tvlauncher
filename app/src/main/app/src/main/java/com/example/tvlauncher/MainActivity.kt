@@ -9,6 +9,7 @@ import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -18,12 +19,52 @@ class AppItem(val label: String, val pkg: String, val icon: Drawable)
 
 class MainActivity : Activity() {
     private val apps = ArrayList<AppItem>()
-    private lateinit var grid: GridView
-    private lateinit var ramText: TextView
+    private var grid: GridView? = null
+    private var ramText: TextView? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var ready = false
+    private var showingError = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val prefs = getSharedPreferences("crash", Context.MODE_PRIVATE)
+        val old = prefs.getString("trace", null)
+
+        Thread.setDefaultUncaughtExceptionHandler { _, e ->
+            prefs.edit().putString("trace", Log.getStackTraceString(e)).commit()
+            android.os.Process.killProcess(android.os.Process.myPid())
+            System.exit(1)
+        }
+
+        if (old != null) {
+            prefs.edit().remove("trace").commit()
+            showError(old)
+            return
+        }
+        try {
+            build()
+            ready = true
+        } catch (e: Throwable) {
+            showError(Log.getStackTraceString(e))
+        }
+    }
+
+    private fun showError(msg: String) {
+        showingError = true
+        val tv = TextView(this).apply {
+            text = "HATA (fotoğrafını çek):\n\n" + msg.take(1800)
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            setPadding(40, 40, 40, 40)
+        }
+        val sv = ScrollView(this).apply {
+            setBackgroundColor(Color.parseColor("#400000"))
+            addView(tv)
+        }
+        setContentView(sv)
+    }
+
+    private fun build() {
         val d = resources.displayMetrics.density
         val p = (32 * d).toInt()
 
@@ -33,11 +74,12 @@ class MainActivity : Activity() {
             setPadding(p, p, p, p)
         }
 
-        ramText = TextView(this).apply {
+        val rt = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 20f
             gravity = Gravity.CENTER_VERTICAL
         }
+        ramText = rt
         val btn = Button(this).apply {
             text = "Belleği Boşalt"
             setOnClickListener { cleanMemory() }
@@ -45,31 +87,37 @@ class MainActivity : Activity() {
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(ramText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(rt, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(btn)
         }
         root.addView(header)
 
-        grid = GridView(this).apply {
+        val g = GridView(this).apply {
             numColumns = 5
             verticalSpacing = (16 * d).toInt()
             horizontalSpacing = (16 * d).toInt()
             setPadding(0, (16 * d).toInt(), 0, 0)
             setOnItemClickListener { _, _, pos, _ -> open(apps[pos].pkg) }
         }
-        root.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        grid = g
+        root.addView(g, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
     }
 
     override fun onResume() {
         super.onResume()
-        loadApps()
-        grid.adapter = Adapter()
-        updateRam(null)
+        if (!ready) return
+        try {
+            loadApps()
+            grid?.adapter = Adapter()
+            updateRam(null)
+        } catch (e: Throwable) {
+            showError(Log.getStackTraceString(e))
+        }
     }
 
     override fun onBackPressed() {
-        // Ana ekranda geri tuşu hiçbir şey yapmasın
+        if (showingError) finish()
     }
 
     private fun usedPercent(): Int {
@@ -81,20 +129,24 @@ class MainActivity : Activity() {
 
     private fun updateRam(before: Int?) {
         val now = usedPercent()
-        ramText.text = if (before == null) "RAM: %$now dolu"
+        ramText?.text = if (before == null) "RAM: %$now dolu"
         else "RAM: %$before → %$now dolu"
     }
 
     private fun cleanMemory() {
-        val before = usedPercent()
-        ramText.text = "Temizleniyor..."
-        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        for (ai in packageManager.getInstalledApplications(0)) {
-            if (ai.packageName != packageName) {
-                try { am.killBackgroundProcesses(ai.packageName) } catch (e: Exception) {}
+        try {
+            val before = usedPercent()
+            ramText?.text = "Temizleniyor..."
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            for (ai in packageManager.getInstalledApplications(0)) {
+                if (ai.packageName != packageName) {
+                    try { am.killBackgroundProcesses(ai.packageName) } catch (e: Exception) {}
+                }
             }
+            handler.postDelayed({ updateRam(before) }, 1500)
+        } catch (e: Throwable) {
+            showError(Log.getStackTraceString(e))
         }
-        handler.postDelayed({ updateRam(before) }, 1500)
     }
 
     private fun open(pkg: String) {
