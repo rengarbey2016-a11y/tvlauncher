@@ -567,12 +567,23 @@ class MainActivity : Activity() {
     private fun playTellocan() {
         stopTellocan()
         try {
-            player = MediaPlayer.create(this, R.raw.tellocan)?.apply {
-                setOnCompletionListener { stopTellocan() }
-                start()
+            val mp = MediaPlayer.create(this, R.raw.tellocan)
+            if (mp == null) {
+                Toast.makeText(this, "Şarkı açılamadı (create null)", Toast.LENGTH_LONG).show()
+                return
             }
+            mp.setVolume(1f, 1f)
+            mp.setOnErrorListener { _, what, extra ->
+                Toast.makeText(this, "Ses hatası: $what / $extra", Toast.LENGTH_LONG).show()
+                stopTellocan()
+                true
+            }
+            mp.setOnCompletionListener { stopTellocan() }
+            player = mp
+            mp.start()
+            Toast.makeText(this, "Şarkı başladı", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Log.w("Firfir", "tellocan failed", e)
+            Toast.makeText(this, "Hata: " + e.toString().take(100), Toast.LENGTH_LONG).show()
         }
     }
 
