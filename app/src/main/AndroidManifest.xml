@@ -7,7 +7,9 @@
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
     <application
-        android:label="TV Launcher"
+        android:label="Fırfır"
+        android:icon="@drawable/ic_pinwheel"
+        android:banner="@drawable/banner"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
         <activity
             android:name=".MainActivity"
