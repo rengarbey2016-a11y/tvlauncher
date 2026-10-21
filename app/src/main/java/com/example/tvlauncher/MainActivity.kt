@@ -1,5 +1,8 @@
 package com.example.tvlauncher
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
@@ -53,7 +56,10 @@ class PinwheelView(ctx: Context) : View(ctx) {
     private val path = Path()
     private val colors = intArrayOf(0x38FF5252, 0x38FFD740, 0x3869F0AE, 0x3840C4FF)
     private var running = false
-    private val startTime = System.nanoTime()
+    private var animT = 0f
+    private var lastNs = 0L
+    private var boostStart = 0L
+    private var boostDur = 0L
 
     init {
         val r = java.util.Random(11)
@@ -73,6 +79,7 @@ class PinwheelView(ctx: Context) : View(ctx) {
 
     fun startAnim() {
         running = true
+        lastNs = 0L
         invalidate()
     }
 
@@ -80,16 +87,34 @@ class PinwheelView(ctx: Context) : View(ctx) {
         running = false
     }
 
+    fun boost(ms: Long) {
+        boostStart = System.nanoTime()
+        boostDur = ms * 1_000_000L
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val nowNs = System.nanoTime()
+        if (lastNs == 0L) lastNs = nowNs
+        var dt = (nowNs - lastNs) / 1_000_000_000f
+        if (dt > 0.1f) dt = 0.1f
+        lastNs = nowNs
+
+        var mul = 1f
+        if (boostDur > 0L) {
+            val f = ((nowNs - boostStart).toFloat() / boostDur.toFloat()).coerceIn(0f, 1f)
+            mul = 1f + 9f * (1f - f) * (1f - f)
+            if (f >= 1f) boostDur = 0L
+        }
+        animT += dt * mul
+
         val w = width.toFloat()
         val h = height.toFloat()
-        val t = (System.nanoTime() - startTime) / 1_000_000_000f
         for (p in items) {
             val cx = p.x * w
             val cy = p.y * h
             val r = p.size * w * 0.9f
-            val angle = p.phase + p.speed * t
+            val angle = p.phase + p.speed * animT
             for (b in 0 until 4) {
                 canvas.save()
                 canvas.translate(cx, cy)
@@ -108,17 +133,99 @@ class PinwheelView(ctx: Context) : View(ctx) {
     }
 }
 
+class ConfettiView(ctx: Context) : View(ctx) {
+    private class C(
+        var x: Float, var y: Float,
+        var vx: Float, var vy: Float,
+        val size: Float, val color: Int,
+        var rot: Float, val vr: Float
+    )
+
+    private val list = ArrayList<C>()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private var running = false
+    private var lastNs = 0L
+    private val palette = intArrayOf(
+        0xFFFF5252.toInt(), 0xFFFFD740.toInt(), 0xFF69F0AE.toInt(),
+        0xFF40C4FF.toInt(), 0xFFB388FF.toInt(), 0xFFFFFFFF.toInt()
+    )
+
+    fun burst(originX: Float, originY: Float, count: Int) {
+        val r = java.util.Random()
+        val d = resources.displayMetrics.density
+        for (i in 0 until count) {
+            val ang = Math.PI + r.nextDouble() * Math.PI
+            val sp = (450 + r.nextInt(700)) * d
+            list.add(
+                C(
+                    originX, originY,
+                    (Math.cos(ang) * sp).toFloat(), (Math.sin(ang) * sp).toFloat(),
+                    (4 + r.nextInt(6)) * d,
+                    palette[r.nextInt(palette.size)],
+                    r.nextFloat() * 360f,
+                    (r.nextFloat() - 0.5f) * 720f
+                )
+            )
+        }
+        if (!running) {
+            running = true
+            lastNs = 0L
+            invalidate()
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val nowNs = System.nanoTime()
+        if (lastNs == 0L) lastNs = nowNs
+        var dt = (nowNs - lastNs) / 1_000_000_000f
+        if (dt > 0.05f) dt = 0.05f
+        lastNs = nowNs
+        val d = resources.displayMetrics.density
+        val g = 1400f * d
+        val h = height.toFloat()
+
+        val it = list.iterator()
+        while (it.hasNext()) {
+            val c = it.next()
+            c.vy += g * dt
+            c.vx *= (1f - 0.7f * dt)
+            c.x += c.vx * dt
+            c.y += c.vy * dt
+            c.rot += c.vr * dt
+            if (c.y > h + 80f) {
+                it.remove()
+                continue
+            }
+            canvas.save()
+            canvas.translate(c.x, c.y)
+            canvas.rotate(c.rot)
+            paint.color = c.color
+            canvas.drawRect(-c.size, -c.size * 0.5f, c.size, c.size * 0.5f, paint)
+            canvas.restore()
+        }
+        if (list.isNotEmpty()) {
+            postInvalidateDelayed(33)
+        } else {
+            running = false
+        }
+    }
+}
+
 class MainActivity : Activity() {
     private val apps = ArrayList<AppItem>()
     private var grid: GridView? = null
     private var ramText: TextView? = null
     private var updateBtn: Button? = null
+    private var cleanBtn: Button? = null
     private var statusText: TextView? = null
     private var pinwheels: PinwheelView? = null
+    private var confetti: ConfettiView? = null
     private val handler = Handler(Looper.getMainLooper())
     private var ready = false
     private var showingError = false
     private var lastCheck = 0L
+    private var cleaning = false
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -251,6 +358,7 @@ class MainActivity : Activity() {
         ub.visibility = View.GONE
         updateBtn = ub
         val cb = styledButton("Belleği Boşalt", Color.parseColor("#26FFFFFF"), Color.parseColor("#7C4DFF")) { cleanMemory() }
+        cleanBtn = cb
 
         val right = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -283,6 +391,11 @@ class MainActivity : Activity() {
         root.addView(g, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         frame.addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        val cf = ConfettiView(this)
+        confetti = cf
+        frame.addView(cf, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
         setContentView(frame)
     }
 
@@ -294,7 +407,7 @@ class MainActivity : Activity() {
             loadApps()
             grid?.adapter = Adapter()
             grid?.requestFocus()
-            updateRam(null)
+            if (!cleaning) updateRam(null)
             checkUpdate()
         } catch (e: Throwable) {
             showError(Log.getStackTraceString(e))
@@ -394,12 +507,19 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun usedPercent(): Int {
+    private fun memInfo(): ActivityManager.MemoryInfo {
         val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val mi = ActivityManager.MemoryInfo()
         am.getMemoryInfo(mi)
+        return mi
+    }
+
+    private fun usedPercent(): Int {
+        val mi = memInfo()
         return (100 - (mi.availMem * 100 / mi.totalMem)).toInt()
     }
+
+    private fun availMb(): Long = memInfo().availMem / (1024 * 1024)
 
     private fun updateRam(before: Int?) {
         val now = usedPercent()
@@ -408,19 +528,62 @@ class MainActivity : Activity() {
     }
 
     private fun cleanMemory() {
+        if (cleaning) return
         try {
+            cleaning = true
             val before = usedPercent()
+            val availBefore = availMb()
             ramText?.text = "Temizleniyor..."
+            pinwheels?.boost(3500)
+
             val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             for (ai in packageManager.getInstalledApplications(0)) {
                 if (ai.packageName != packageName) {
                     try { am.killBackgroundProcesses(ai.packageName) } catch (e: Exception) {}
                 }
             }
-            handler.postDelayed({ updateRam(before) }, 1500)
+
+            handler.postDelayed({
+                try {
+                    val after = usedPercent()
+                    val freed = availMb() - availBefore
+                    fireConfetti(if (before - after >= 5) 90 else 30)
+                    animateRam(before, after, freed)
+                } catch (e: Throwable) {
+                    cleaning = false
+                    showError(Log.getStackTraceString(e))
+                }
+            }, 1500)
         } catch (e: Throwable) {
+            cleaning = false
             showError(Log.getStackTraceString(e))
         }
+    }
+
+    private fun fireConfetti(count: Int) {
+        val cf = confetti ?: return
+        val btn = cleanBtn ?: return
+        val a = IntArray(2)
+        val b = IntArray(2)
+        btn.getLocationOnScreen(a)
+        cf.getLocationOnScreen(b)
+        val x = (a[0] - b[0]) + btn.width / 2f
+        val y = (a[1] - b[1]) + btn.height / 2f
+        cf.burst(x, y, count)
+    }
+
+    private fun animateRam(before: Int, after: Int, freedMb: Long) {
+        val va = ValueAnimator.ofInt(before, after)
+        va.duration = if (before == after) 300L else 1400L
+        va.addUpdateListener { ramText?.text = "RAM: %${it.animatedValue} dolu" }
+        va.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                val extra = if (freedMb > 0) " · $freedMb MB boşaldı" else ""
+                ramText?.text = "RAM: %$before → %$after dolu$extra"
+                cleaning = false
+            }
+        })
+        va.start()
     }
 
     private fun open(pkg: String) {
