@@ -6,14 +6,26 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.Drawable
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.core.content.FileProvider
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
+
+const val API_URL = "https://api.github.com/repos/rengarbey2016-a11y/tvlauncher/releases/tags/latest"
+const val APK_URL = "https://github.com/rengarbey2016-a11y/tvlauncher/releases/download/latest/app-debug.apk"
 
 class AppItem(val label: String, val pkg: String, val icon: Drawable)
 
@@ -21,9 +33,11 @@ class MainActivity : Activity() {
     private val apps = ArrayList<AppItem>()
     private var grid: GridView? = null
     private var ramText: TextView? = null
+    private var updateBtn: Button? = null
     private val handler = Handler(Looper.getMainLooper())
     private var ready = false
     private var showingError = false
+    private var lastCheck = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,6 +94,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         ramText = rt
+        val ub = Button(this).apply {
+            text = "Güncelle"
+            visibility = View.GONE
+            setOnClickListener { startUpdate() }
+        }
+        updateBtn = ub
         val btn = Button(this).apply {
             text = "Belleği Boşalt"
             setOnClickListener { cleanMemory() }
@@ -88,6 +108,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(rt, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(ub)
             addView(btn)
         }
         root.addView(header)
@@ -111,6 +132,7 @@ class MainActivity : Activity() {
             loadApps()
             grid?.adapter = Adapter()
             updateRam(null)
+            checkUpdate()
         } catch (e: Throwable) {
             showError(Log.getStackTraceString(e))
         }
@@ -118,6 +140,86 @@ class MainActivity : Activity() {
 
     override fun onBackPressed() {
         if (showingError) finish()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun currentVersion(): Int =
+        packageManager.getPackageInfo(packageName, 0).versionCode
+
+    private fun checkUpdate() {
+        val now = System.currentTimeMillis()
+        if (now - lastCheck < 10 * 60 * 1000) return
+        lastCheck = now
+        thread {
+            try {
+                val c = URL(API_URL).openConnection() as HttpURLConnection
+                c.connectTimeout = 8000
+                c.readTimeout = 8000
+                c.setRequestProperty("User-Agent", "Firfir")
+                val json = c.inputStream.bufferedReader().use { it.readText() }
+                val latest = JSONObject(json).optString("body").trim().toIntOrNull()
+                if (latest != null && latest > currentVersion()) {
+                    handler.post {
+                        updateBtn?.apply {
+                            text = "Güncelle (v$latest)"
+                            visibility = View.VISIBLE
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("Firfir", "update check failed", e)
+            }
+        }
+    }
+
+    private fun startUpdate() {
+        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "Fırfır'a kurulum izni ver, sonra Güncelle'ye tekrar bas", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        updateBtn?.apply {
+            isEnabled = false
+            text = "İndiriliyor..."
+        }
+        thread {
+            try {
+                val dir = File(cacheDir, "updates").apply { mkdirs() }
+                val f = File(dir, "update.apk")
+                val c = URL(APK_URL).openConnection() as HttpURLConnection
+                c.connectTimeout = 15000
+                c.readTimeout = 30000
+                c.setRequestProperty("User-Agent", "Firfir")
+                c.inputStream.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+                handler.post { install(f) }
+            } catch (e: Exception) {
+                Log.w("Firfir", "download failed", e)
+                handler.post {
+                    updateBtn?.apply {
+                        isEnabled = true
+                        text = "Tekrar dene"
+                    }
+                    Toast.makeText(this, "İndirme başarısız", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun install(f: File) {
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
+            val i = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(i)
+        } catch (e: Exception) {
+            showError(Log.getStackTraceString(e))
+        }
+        updateBtn?.apply {
+            isEnabled = true
+            text = "Güncelle"
+        }
     }
 
     private fun usedPercent(): Int {
