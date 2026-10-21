@@ -4,7 +4,10 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -42,12 +45,76 @@ class Card(ctx: Context) : LinearLayout(ctx) {
     }
 }
 
+class PinwheelView(ctx: Context) : View(ctx) {
+    private class P(val x: Float, val y: Float, val size: Float, val speed: Float, val phase: Float)
+
+    private val items = ArrayList<P>()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val path = Path()
+    private val colors = intArrayOf(0x38FF5252, 0x38FFD740, 0x3869F0AE, 0x3840C4FF)
+    private var running = false
+    private val startTime = System.nanoTime()
+
+    init {
+        val r = java.util.Random(11)
+        for (i in 0 until 7) {
+            val dir = if (i % 2 == 0) 1f else -1f
+            items.add(
+                P(
+                    r.nextFloat(),
+                    r.nextFloat(),
+                    0.10f + r.nextFloat() * 0.14f,
+                    (18f + r.nextFloat() * 32f) * dir,
+                    r.nextFloat() * 360f
+                )
+            )
+        }
+    }
+
+    fun startAnim() {
+        running = true
+        invalidate()
+    }
+
+    fun stopAnim() {
+        running = false
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val t = (System.nanoTime() - startTime) / 1_000_000_000f
+        for (p in items) {
+            val cx = p.x * w
+            val cy = p.y * h
+            val r = p.size * w * 0.9f
+            val angle = p.phase + p.speed * t
+            for (b in 0 until 4) {
+                canvas.save()
+                canvas.translate(cx, cy)
+                canvas.rotate(angle + b * 90f)
+                paint.color = colors[b]
+                path.reset()
+                path.moveTo(0f, 0f)
+                path.lineTo(0f, -r)
+                path.lineTo(r * 0.52f, -r * 0.72f)
+                path.close()
+                canvas.drawPath(path, paint)
+                canvas.restore()
+            }
+        }
+        if (running) postInvalidateDelayed(40)
+    }
+}
+
 class MainActivity : Activity() {
     private val apps = ArrayList<AppItem>()
     private var grid: GridView? = null
     private var ramText: TextView? = null
     private var updateBtn: Button? = null
     private var statusText: TextView? = null
+    private var pinwheels: PinwheelView? = null
     private val handler = Handler(Looper.getMainLooper())
     private var ready = false
     private var showingError = false
@@ -136,9 +203,14 @@ class MainActivity : Activity() {
             GradientDrawable.Orientation.TL_BR,
             intArrayOf(Color.parseColor("#0B1020"), Color.parseColor("#1B1F4B"), Color.parseColor("#3A1C71"))
         )
+        val frame = FrameLayout(this).apply { background = bg }
+
+        val pw = PinwheelView(this)
+        pinwheels = pw
+        frame.addView(pw, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = bg
             setPadding(dp(48), dp(28), dp(48), dp(20))
         }
 
@@ -209,13 +281,16 @@ class MainActivity : Activity() {
         }
         grid = g
         root.addView(g, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        setContentView(root)
+
+        frame.addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(frame)
     }
 
     override fun onResume() {
         super.onResume()
         if (!ready) return
         try {
+            pinwheels?.startAnim()
             loadApps()
             grid?.adapter = Adapter()
             grid?.requestFocus()
@@ -224,6 +299,11 @@ class MainActivity : Activity() {
         } catch (e: Throwable) {
             showError(Log.getStackTraceString(e))
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        pinwheels?.stopAnim()
     }
 
     override fun onBackPressed() {
