@@ -566,24 +566,30 @@ class MainActivity : Activity() {
 
     private fun playTellocan() {
         stopTellocan()
+        var mp: MediaPlayer? = null
         try {
-            val mp = MediaPlayer.create(this, R.raw.tellocan)
-            if (mp == null) {
-                Toast.makeText(this, "Şarkı açılamadı (create null)", Toast.LENGTH_LONG).show()
-                return
+            val afd = resources.openRawResourceFd(R.raw.tellocan)
+            val kb = afd.length / 1024
+            mp = MediaPlayer()
+            try {
+                mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            } finally {
+                afd.close()
             }
-            mp.setVolume(1f, 1f)
             mp.setOnErrorListener { _, what, extra ->
                 Toast.makeText(this, "Ses hatası: $what / $extra", Toast.LENGTH_LONG).show()
                 stopTellocan()
                 true
             }
             mp.setOnCompletionListener { stopTellocan() }
+            mp.prepare()
+            mp.setVolume(1f, 1f)
             player = mp
             mp.start()
-            Toast.makeText(this, "Şarkı başladı", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Şarkı başladı ($kb KB)", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "Hata: " + e.toString().take(100), Toast.LENGTH_LONG).show()
+            try { mp?.release() } catch (x: Exception) {}
+            Toast.makeText(this, "Hata: " + e.toString().take(150), Toast.LENGTH_LONG).show()
         }
     }
 
