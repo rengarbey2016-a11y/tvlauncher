@@ -14,7 +14,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-      - run: gradle assembleDebug
+      - name: Anahtari hazirla
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/tv.jks"
+      - name: Derle
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/tv.jks
+        run: gradle assembleDebug
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
