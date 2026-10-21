@@ -16,6 +16,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -226,6 +227,7 @@ class MainActivity : Activity() {
     private var showingError = false
     private var lastCheck = 0L
     private var cleaning = false
+    private var player: MediaPlayer? = null
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -417,6 +419,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         pinwheels?.stopAnim()
+        stopTellocan()
     }
 
     override fun onBackPressed() {
@@ -535,6 +538,7 @@ class MainActivity : Activity() {
             val availBefore = availMb()
             ramText?.text = "Temizleniyor..."
             pinwheels?.boost(3500)
+            playTellocan()
 
             val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             for (ai in packageManager.getInstalledApplications(0)) {
@@ -558,6 +562,23 @@ class MainActivity : Activity() {
             cleaning = false
             showError(Log.getStackTraceString(e))
         }
+    }
+
+    private fun playTellocan() {
+        stopTellocan()
+        try {
+            player = MediaPlayer.create(this, R.raw.tellocan)?.apply {
+                setOnCompletionListener { stopTellocan() }
+                start()
+            }
+        } catch (e: Exception) {
+            Log.w("Firfir", "tellocan failed", e)
+        }
+    }
+
+    private fun stopTellocan() {
+        try { player?.release() } catch (e: Exception) {}
+        player = null
     }
 
     private fun fireConfetti(count: Int) {
