@@ -1,10 +1,14 @@
 package com.example.tvlauncher
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -15,30 +19,82 @@ class AppItem(val label: String, val pkg: String, val icon: Drawable)
 class MainActivity : Activity() {
     private val apps = ArrayList<AppItem>()
     private lateinit var grid: GridView
+    private lateinit var ramText: TextView
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val d = resources.displayMetrics.density
+        val p = (32 * d).toInt()
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#111111"))
+            setPadding(p, p, p, p)
+        }
+
+        ramText = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val btn = Button(this).apply {
+            text = "Belleği Boşalt"
+            setOnClickListener { cleanMemory() }
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(ramText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(btn)
+        }
+        root.addView(header)
+
         grid = GridView(this).apply {
             numColumns = 5
-            setBackgroundColor(Color.parseColor("#111111"))
-            val p = (32 * d).toInt()
-            setPadding(p, p, p, p)
             verticalSpacing = (16 * d).toInt()
             horizontalSpacing = (16 * d).toInt()
+            setPadding(0, (16 * d).toInt(), 0, 0)
             setOnItemClickListener { _, _, pos, _ -> open(apps[pos].pkg) }
         }
-        setContentView(grid)
+        root.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        setContentView(root)
     }
 
     override fun onResume() {
         super.onResume()
         loadApps()
         grid.adapter = Adapter()
+        updateRam(null)
     }
 
     override fun onBackPressed() {
         // Ana ekranda geri tuşu hiçbir şey yapmasın
+    }
+
+    private fun usedPercent(): Int {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val mi = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        return (100 - (mi.availMem * 100 / mi.totalMem)).toInt()
+    }
+
+    private fun updateRam(before: Int?) {
+        val now = usedPercent()
+        ramText.text = if (before == null) "RAM: %$now dolu"
+        else "RAM: %$before → %$now dolu"
+    }
+
+    private fun cleanMemory() {
+        val before = usedPercent()
+        ramText.text = "Temizleniyor..."
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        for (ai in packageManager.getInstalledApplications(0)) {
+            if (ai.packageName != packageName) {
+                try { am.killBackgroundProcesses(ai.packageName) } catch (e: Exception) {}
+            }
+        }
+        handler.postDelayed({ updateRam(before) }, 1500)
     }
 
     private fun open(pkg: String) {
